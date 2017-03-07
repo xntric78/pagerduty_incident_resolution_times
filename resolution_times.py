@@ -6,17 +6,18 @@ import requests
 import sys
 import json
 from urllib import urlencode
+import os
 
 #Your PagerDuty API key.  A read-only key will work for this.
-AUTH_TOKEN = 'YQstXoCv5Jsib56A6zeu'
+AUTH_TOKEN = #os.environ["PGR_API_TOKEN"]
 #The API base url, make sure to include the subdomain
-BASE_URL = 'https://pdt-ryan.pagerduty.com/api/v1'
+BASE_URL = 'https://api.pagerduty.com'
 #The service that you would like to get data on
-service_id = "PFZ3ZG7"
+service_id = "P4E6D31"
 
 HEADERS = {
     'Authorization': 'Token token={0}'.format(AUTH_TOKEN),
-    'Content-type': 'application/json',
+    'Accept': 'application/vnd.pagerduty+json;version=2'
 }
 
 total_time = 0
@@ -26,13 +27,9 @@ escalation_count = 0
 acked_count = 0
 
 def get_service_name(service_id):
-    params = {
-        'service':service_id
-    }
     services = requests.get(
         '{0}/services/{1}'.format(BASE_URL,service_id),
-        headers=HEADERS,
-        data=json.dumps(params)
+        headers=HEADERS
     )
     return services.json()['service']['name']
 
@@ -40,14 +37,17 @@ def get_incident_count(service_id):
     global incident_count
 
     params = {
-        'service':service_id,
-        'date_range':'all'
+        'total': True,
+        'service_ids[]': [service_id]
     }
+
     count = requests.get(
-        '{0}/incidents/count'.format(BASE_URL),
+        '{0}/incidents'.format(BASE_URL),
         headers=HEADERS,
-        data=json.dumps(params)
+        params=params
     )
+    print count.url
+    print count.text
     incident_count = count.json()['total']
 
 def get_incidents(service_id, offset):
@@ -56,16 +56,16 @@ def get_incidents(service_id, offset):
     params = {
         'offset':offset,
         'limit':100,
-        'service':service_id,
+        'service_ids[]':service_id,
         'date_range':'all'
     }
     all_incidents = requests.get(
         '{0}/incidents'.format(BASE_URL),
         headers=HEADERS,
-        data=json.dumps(params)
+        params=params
     )
 
-    print "Listing all incidents:"
+    print "Listing all incidents: offset:{0}".format(offset)
     for incident in all_incidents.json()['incidents']:
         print  "{0}:{1}".format(incident["incident_number"],incident["id"])
         get_incident_times(incident["id"])
@@ -85,18 +85,19 @@ def get_incident_times(incident_id):
     }
     log_entries = requests.get(
         '{0}/incidents/{1}/log_entries'.format(BASE_URL,incident_id),
-        headers=HEADERS
+        headers=HEADERS,
+        params=params
     )
 
     for log_entry in log_entries.json()['log_entries']:
-        if log_entry["type"] == "trigger":
+        if log_entry["type"] == "trigger_log_entry":
             if log_entry["created_at"] > start_time:
                 start_time = time.mktime(datetime.datetime.strptime(log_entry["created_at"],"%Y-%m-%dT%H:%M:%SZ").timetuple())
-        elif log_entry["type"] == "resolve":
+        elif log_entry["type"] == "resolve_log_entry":
             end_time = time.mktime(datetime.datetime.strptime(log_entry["created_at"],"%Y-%m-%dT%H:%M:%SZ").timetuple())
-        elif log_entry["type"] == "acknowledge":
+        elif log_entry["type"] == "acknowledge_log_entry":
             ack_time = time.mktime(datetime.datetime.strptime(log_entry["created_at"],"%Y-%m-%dT%H:%M:%SZ").timetuple())
-        elif log_entry["type"] in ("escalate", "assign"):
+        elif log_entry["type"] in ("escalate_log_entry", "assign_log_entry"):
             escalation_count = escalation_count + 1
 
     if end_time:
